@@ -1,1 +1,76 @@
 
+-- SimplicityHL for simplicityc (best-effort, requires your simplicityc toolchain)
+-- Filename: vault.simplicityc.simphl
+-- NOTE: This file is a best-effort translation of the prototype pseudocode to a form compatible with Blockstream's simplicityc toolchain.
+-- You will likely need to adjust primitive names or import the right standard library modules used in your simplicityc installation.
+-- The contract implements: k-of-m multisig OR (timelock AND reduced-multisig) OR (emergency_pubkey after emergency_lock)
+
+-- High level assumptions:
+-- * Primitives available: ec_verify, count_set_bits, ge (>=), load_u32/load_u64, bitmask operations, DEBUG/ASSERT as needed.
+-- * Input encoding: The contract expects a tuple (args, current_height)
+--   where args is a record-like tuple:
+--     (sigmask, pubkeys_blob, sigs_blob, locktime, emergency_lock, emergency_pubkey, emergency_sig)
+--   Encoding of blobs (pubkeys_blob, sigs_blob) is application-level; the contract uses ec_verify on per-pubkey sigs extracted.
+
+-- === Helper combinators ===
+-- These are written at a high level; replace with actual combinator implementations per your toolchain.
+
+-- Extractors (placeholders)
+let get_sigmask = take  -- args -> sigmask
+let get_pubkeys_blob = drop  -- args -> pubkeys_blob
+-- (In real SimplicityHL you'll use pair/take/drop to extract specific tuple fields)
+
+-- Multisig check: verify at least k bits set and corresponding signatures validate.
+-- This is provided as a single combinator `multisig_check k m` to keep the high-level logic clear.
+-- Implement this by iterating over m pubkeys, verifying ec_verify for each set bit in sigmask,
+-- counting verified signatures, and comparing with k.
+
+-- For simplicity, we present multisig_check as a witness-enabled primitive:
+witness "multisig_check_k_of_m" : (Bitmask × PubkeysBlob × SigsBlob) -> Bool.
+
+-- Reduced multisig (k' threshold)
+witness "multisig_check_kp_of_m" : (Bitmask × PubkeysBlob × SigsBlob) -> Bool.
+
+-- ECVerify for emergency key
+witness "ec_verify_emergency" : (EmergencySig × EmergencyPubkey × Digest) -> Bool.
+
+-- Ge comparator for heights
+witness "ge_u32" : (u32 × u32) -> Bool.
+
+-- Main vault predicate
+-- Input: (args, current_height)
+-- args encoded as tuple: (sigmask, pubkeys_blob, sigs_blob, locktime, emergency_lock, emergency_pubkey, emergency_sig)
+
+let vault_predicate =
+  -- unpack inputs (using pair/take/drop pattern)
+  let arg_pair = take in               -- arg_pair = args
+  let current_height = drop in         -- current_height
+
+  -- For clarity, rebind fields (these are conceptual; translate using pair/take/drop)
+  let sigmask = take arg_pair in
+  let pubkeys_blob = drop (take (drop arg_pair)) in
+  let sigs_blob = drop (take (drop (drop arg_pair))) in
+  let locktime = drop (drop (take (drop arg_pair))) in
+  let emergency_lock = drop (drop (drop (take (drop arg_pair)))) in
+  let emergency_pubkey = drop (drop (drop (drop (take (drop arg_pair))))) in
+  let emergency_sig = drop (drop (drop (drop (drop (take (drop arg_pair)))))) in
+
+  -- Condition A: k-of-m multisig satisfied
+  let condA = witness_call "multisig_check_k_of_m" (sigmask, pubkeys_blob, sigs_blob) in
+
+  -- Condition B: timelock passed AND reduced multisig satisfied
+  let lock_ok = witness_call "ge_u32" (current_height, locktime) in
+  let condB_multisig = witness_call "multisig_check_kp_of_m" (sigmask, pubkeys_blob, sigs_blob) in
+  let condB = and (lock_ok, condB_multisig) in
+
+  -- Condition C: emergency path
+  -- emergency_lock passed AND emergency signature verifies
+  let emergency_ok = and ( witness_call "ge_u32" (current_height, emergency_lock),
+                          witness_call "ec_verify_emergency" (emergency_sig, emergency_pubkey, /* digest */ unit) )
+  in
+
+  -- Final: condA OR condB OR emergency_ok
+  or (condA, or (condB, emergency_ok))
+
+-- Export the entrypoint
+export "spend_vault" = vault_predicate
