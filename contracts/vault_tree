@@ -1,1 +1,11 @@
 
+Combinator tree (high-level)
+ROOT
+├─ OR3
+│  ├─ MULTISIG_CHECK (k-of-m)
+│  ├─ AND
+│  │  ├─ TIMLOCK_CHECK (current_height >= locktime)
+│  │  └─ MULTISIG_REDUCED_CHECK (k'-of-m)
+│  └─ AND
+│     ├─ TIMLOCK_CHECK (current_height >= emergency_lock)
+│     └─ ECVERIFY (emergency_pubkey signature)
