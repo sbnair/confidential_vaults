@@ -1,1 +1,49 @@
 
+-- SimplicityHL prototype: Confidential Vault
+-- This is illustrative SimplicityHL-like pseudocode. Adapt syntax to your SimplicityHL toolchain.
+-- Features:
+--  - n-of-m multisig spending
+--  - timelock fallback (CSV/CLTV style)
+--  - emergency-recovery pubkey that can spend after a longer timelock
+--  - returns boolean success; inputs include signatures + current blockheight
+
+-- Types:
+--  PubKey: 256-bit compressed pubkey (placeholder type)
+--  Sig: signature object (placeholder)
+--  Height: integer (block height)
+--  Args: record { sigs: [Sig], pubkeys: [PubKey], sigmask: bitmask, locktime: Height, emergency_lock: Height, emergency_pubkey: PubKey }
+
+-- NOTE: Real SimplicityHL will require exact bit widths and combinators.
+
+let k_of_m_multisig =  rgs ->
+  -- args: {sigmask : m-bitmask, pubkeys : m-array, sigs : ...}
+  -- Verify that sigmask has at least k bits set and each provided signature verifies against corresponding pubkey.
+  -- This is a higher-level description; implement via combination of ecVerify combinators and bit-count thresholding.
+  verify_multisig(args.sigmask, args.pubkeys, args.sigs)
+
+let timelock_ok =  rgs current_height ->
+  -- true if current_height >= args.locktime
+  ge(current_height, args.locktime)
+
+let emergency_ok =  rgs current_height ->
+  -- true if current_height >= args.emergency_lock AND signature by emergency_pubkey
+  and( ge(current_height, args.emergency_lock),
+       ecVerify(args.sigs.emergency_sig, args.emergency_pubkey, spending_digest) )
+
+-- Main spending predicate:
+-- Allowed if:
+--  (A) multisig condition satisfied
+--  OR
+--  (B) timelock has passed AND multisig (optional reduced threshold)
+--  OR
+--  (C) emergency_ok
+
+let vault_spend =  rgs current_height ->
+  or3(
+    k_of_m_multisig(args),
+    and(timelock_ok(args, current_height), k_of_m_multisig_reduced(args)),
+    emergency_ok(args, current_height)
+  )
+
+-- Exported entrypoint that accepts serialized args and current blockheight
+export "spend_vault" = vault_spend
